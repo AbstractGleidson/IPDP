@@ -1,0 +1,308 @@
+% !TEX program = pdflatex
+\documentclass[12pt]{article}
+
+\usepackage{sbc-template}
+\usepackage{graphicx}
+\usepackage[hyphens]{url}
+\urlstyle{same}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[brazilian]{babel}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage[table]{xcolor}
+\usepackage{float}
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta}
+
+\sloppy
+
+\renewcommand{\topfraction}{0.9}
+\renewcommand{\bottomfraction}{0.8}
+\renewcommand{\textfraction}{0.1}
+\renewcommand{\floatpagefraction}{0.8}
+\setlength{\textfloatsep}{8pt plus 2pt minus 2pt}
+\setlength{\floatsep}{8pt plus 2pt minus 2pt}
+\setlength{\intextsep}{8pt plus 2pt minus 2pt}
+
+\definecolor{borda}{HTML}{DCE8F6}
+\definecolor{bordaesc}{HTML}{2E6DB4}
+\definecolor{cinza}{HTML}{8A8F98}
+
+\title{Fluxo de inspeção de peças em linha de montagem com processamento distribuído}
+
+\author{Gleidson Luan Sena Alves\inst{1}, \\ Ivan Vitor Dias de Oliveira\inst{1}}
+
+\address{Departamento de Computação -- Universidade Federal do Piauí (UFPI)\\
+  Teresina -- PI -- Brasil
+  \email{\{gleidson.alves, ivan.oliveira\}@ufpi.edu.br}
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+  This paper proposes a visual inspection system for fasteners (screws, nuts, washers, and nails) in which a low-cost embedded device, an ESP32-CAM, captures images and transmits them wirelessly to a more powerful computer responsible for classification. The central research question is which information the edge device should transmit: the full compressed frame, only the regions of interest obtained by local segmentation, or only shape descriptors of the objects. The work applies three digital image processing topics: image compression, segmentation, and representation and description. The three transmission strategies will be compared in terms of bytes per frame, end-to-end latency, computational cost at the edge, and classification accuracy, with the goal of deriving a trade-off curve that guides the division of tasks between edge and server in resource-constrained inspection systems.
+\end{abstract}
+
+\begin{resumo}
+  Este artigo propõe um sistema de inspeção visual de peças de fixação (parafusos, porcas, arruelas e pregos) em que um dispositivo embarcado de baixo custo, um ESP32-CAM, adquire as imagens e as envia por rede sem fio a um computador mais potente, responsável pela classificação. A questão central investigada é qual informação o dispositivo de borda deve transmitir: o quadro inteiro comprimido, apenas as regiões de interesse obtidas por segmentação local ou somente descritores de forma dos objetos. O trabalho aplica três tópicos de processamento digital de imagens: compressão de imagens, segmentação e representação e descrição. As três estratégias de transmissão serão comparadas quanto a bytes por quadro, latência ponta a ponta, custo computacional na borda e acurácia da classificação, com o objetivo de obter uma curva de compromisso que oriente a divisão de tarefas entre borda e servidor em sistemas de inspeção com recursos limitados.
+\end{resumo}
+
+% ============================================================
+\section{Introdução}
+\label{sec:introducao}
+% ============================================================
+
+A inspeção visual automatizada é uma das aplicações mais consolidadas da visão computacional na indústria, usada para verificar presença, identidade, dimensão e defeitos de peças em linhas de produção \cite{golnabi2007}. Em pequenas e médias empresas, porém, sistemas comerciais de visão de máquina costumam ter custo elevado, o que motiva soluções baseadas em hardware embarcado acessível.
+
+Plataformas como o ESP32-CAM tornam viável instalar câmeras conectadas em vários pontos de uma linha de produção. Esses dispositivos, entretanto, têm memória, processamento e banda de rede limitados. Uma arquitetura comum é dividir o trabalho: o dispositivo de borda captura as imagens e um servidor mais potente as analisa, em linha com o paradigma de computação de borda \cite{shi2016,satyanarayanan2017}.
+
+Essa divisão levanta um problema de projeto pouco explorado em trabalhos didáticos: o que, exatamente, a borda deve enviar. Transmitir quadros inteiros sobrecarrega a rede; comprimir demais pode degradar a segmentação e a classificação; processar na borda reduz o tráfego, mas consome recursos escassos. Este projeto investiga esse compromisso de forma experimental, usando técnicas clássicas de compressão, segmentação e representação e descrição apresentadas em \cite{gonzalez2018}.
+
+A classe de objetos escolhida, peças de fixação metálicas, oferece formas bem distintas entre si, o que permite avaliar descritores clássicos de forma sem depender de redes neurais profundas e em um ambiente de captura controlável.
+
+% ============================================================
+\section{Objetivos}
+\label{sec:objetivos}
+% ============================================================
+
+\subsection{Objetivo geral}
+
+Desenvolver e avaliar um sistema distribuído de inspeção visual de peças de fixação, no qual um dispositivo embarcado adquire imagens e um servidor realiza a classificação, analisando como diferentes estratégias de compressão e de divisão de tarefas entre borda e servidor afetam banda, latência e acurácia.
+
+\subsection{Objetivos específicos}
+
+\begin{enumerate}
+  \item Construir um ambiente de captura controlado, com iluminação difusa e fundo uniforme, e um conjunto de dados rotulado de peças de fixação.
+  \item Implementar a comunicação entre o dispositivo de borda e o servidor por rede sem fio.
+  \item Aplicar e comparar técnicas de compressão com e sem perdas (JPEG, codificação por comprimento de corrida e codificação de Huffman), medindo taxa de compressão, PSNR e SSIM.
+  \item Implementar e comparar métodos de segmentação (limiarização de Otsu, limiarização adaptativa e \textit{watershed}), avaliando-os por IoU em relação a máscaras de referência.
+  \item Extrair descritores de fronteira e regionais (código de cadeia, descritores de Fourier, momentos invariantes de Hu, compacidade, excentricidade e número de Euler).
+  \item Treinar e avaliar classificadores clássicos (k-NN e SVM) sobre os descritores extraídos.
+  \item Comparar três estratégias de transmissão quanto a bytes por quadro, latência, uso de CPU na borda e acurácia de classificação.
+\end{enumerate}
+
+% ============================================================
+\section{Revisão da Literatura}
+\label{sec:revisao}
+% ============================================================
+
+\subsection{Visão computacional na inspeção industrial}
+
+Sistemas de visão de máquina industriais seguem, em geral, uma cadeia de aquisição, pré-processamento, segmentação, extração de características e decisão \cite{golnabi2007}. A qualidade da aquisição, sobretudo a iluminação e o contraste entre objeto e fundo, costuma determinar o desempenho de todas as etapas seguintes. Por isso, ambientes de captura controlados são prática comum em aplicações de inspeção.
+
+\subsection{Computação de borda}
+
+A computação de borda propõe processar dados próximos de onde são gerados, reduzindo latência e tráfego de rede em relação ao envio integral para a nuvem \cite{shi2016}. Em \cite{satyanarayanan2017}, destaca-se que a decisão sobre onde executar cada etapa depende do equilíbrio entre capacidade computacional local, banda disponível e requisitos de tempo de resposta. Em visão computacional, isso se traduz na escolha entre transmitir imagens brutas, imagens comprimidas, recortes ou apenas características extraídas.
+
+\subsection{Compressão de imagens}
+
+A compressão de imagens é organizada em torno da eliminação de três tipos de redundância: de codificação, espacial e temporal, e de informação irrelevante para a percepção \cite{gonzalez2018}. A codificação de Huffman \cite{huffman1952} reduz a redundância de codificação atribuindo códigos mais curtos a símbolos mais frequentes. A codificação por comprimento de corrida (RLE) é especialmente eficiente para imagens binárias, como máscaras de segmentação, que possuem longas sequências de pixels iguais.
+
+O padrão JPEG \cite{wallace1992} combina a transformada discreta do cosseno \cite{ahmed1974}, quantização e codificação entrópica, permitindo ajustar a taxa de compressão pela qualidade. Como a quantização descarta informação, ela introduz artefatos de bloco que podem afetar as bordas dos objetos. A fidelidade da imagem reconstruída pode ser medida pela PSNR e pelo índice SSIM \cite{wang2004}, este mais alinhado à percepção estrutural.
+
+\subsection{Segmentação}
+
+A segmentação divide a imagem em regiões que correspondem aos objetos de interesse \cite{gonzalez2018}. O método de Otsu \cite{otsu1979} escolhe automaticamente o limiar global que maximiza a variância entre classes do histograma, sendo eficaz quando há bom contraste entre objeto e fundo. Quando a iluminação não é uniforme, a limiarização adaptativa calcula limiares locais.
+
+Para separar objetos que se tocam, a transformada \textit{watershed} \cite{vincent1991}, aplicada sobre a transformada de distância da máscara binária, é uma solução clássica. Operações morfológicas de abertura e fechamento são usadas para remover ruído e preencher falhas antes da rotulação de componentes conexos.
+
+\subsection{Representação e descrição}
+
+Após a segmentação, cada região precisa ser representada e descrita por características numéricas adequadas ao reconhecimento \cite{gonzalez2018}. O código de cadeia de Freeman \cite{freeman1961} representa a fronteira como uma sequência de direções, sendo compacto e adequado para transmissão. Os descritores de Fourier \cite{zahn1972} representam a fronteira no domínio da frequência e podem ser normalizados para invariância a translação, rotação e escala.
+
+Entre os descritores regionais, os momentos invariantes de Hu \cite{hu1962} são sete combinações de momentos centrais normalizados, invariantes a translação, rotação e escala. Descritores simples como área, perímetro, compacidade, excentricidade e número de Euler complementam essa representação; o número de Euler, em particular, distingue peças com furo, como porcas e arruelas, de peças sólidas, como parafusos e pregos.
+
+\subsection{Classificação}
+
+Classificadores clássicos operam sobre vetores de descritores. O k-vizinhos mais próximos \cite{cover1967} é simples e não exige treinamento explícito, enquanto as máquinas de vetores de suporte \cite{cortes1995} buscam a margem máxima entre classes e lidam bem com poucos exemplos. Detectores baseados em redes neurais, como o YOLO \cite{redmon2016}, alcançam alto desempenho em cenários complexos, mas exigem mais dados e processamento; neste trabalho, servem apenas como referência comparativa opcional.
+
+% ============================================================
+\section{Metodologia}
+\label{sec:metodologia}
+% ============================================================
+
+O trabalho será conduzido em cinco etapas: montagem do ambiente e do conjunto de dados, implementação do \textit{pipeline} no servidor, implementação das estratégias de transmissão na borda, experimentos comparativos e análise dos resultados. O \textit{pipeline} de análise será construído primeiro no servidor, com imagens de boa qualidade, e só depois levado à borda e submetido à compressão, de modo que haja sempre uma referência funcional para comparação.
+
+\subsection{Arquitetura do sistema}
+
+O sistema tem dois nós. O nó de borda, um ESP32-CAM com sensor OV2640, captura as imagens e executa, conforme a estratégia, nenhuma, parte ou toda a etapa de pré-processamento. O servidor, um computador pessoal com Python, OpenCV e scikit-learn, recebe os dados, completa o processamento, classifica as peças e registra as métricas. A comunicação será feita por Wi-Fi, via \textit{sockets} TCP ou HTTP, e o servidor devolverá à borda a classe prevista, o que permite medir a latência de ida e volta sem sincronizar relógios. A Figura~\ref{fig:estrategias} resume as três estratégias de transmissão avaliadas.
+
+\begin{figure}[!htbp]
+  \centering
+  \begin{tikzpicture}[
+      font=\sffamily\footnotesize,
+      etapa/.style={draw=cinza, rounded corners=3pt, minimum width=2.4cm, minimum height=0.75cm, align=center},
+      eb/.style={etapa, draw=bordaesc, fill=borda, thick},
+      seta/.style={-{Stealth[length=4pt]}, cinza},
+      rede/.style={-{Stealth[length=5pt]}, bordaesc, very thick},
+      rot/.style={font=\sffamily\scriptsize, above=7pt, text=bordaesc}
+    ]
+    % E1
+    \node[anchor=east] at (-0.2,0) {\textbf{E1}};
+    \node[eb] (a1) at (1.2,0) {Captura e\\JPEG};
+    \node[etapa] (a2) at (4.6,0) {Segmentação};
+    \node[etapa] (a3) at (8.0,0) {Descrição};
+    \node[etapa] (a4) at (11.4,0) {Classificação};
+    \draw[rede] (a1) -- node[rot] {quadro} (a2);
+    \draw[seta] (a2) -- (a3); \draw[seta] (a3) -- (a4);
+    % E2
+    \node[anchor=east] at (-0.2,-1.4) {\textbf{E2}};
+    \node[eb] (b1) at (1.2,-1.4) {Captura};
+    \node[eb] (b2) at (4.6,-1.4) {Segmentação};
+    \node[etapa] (b3) at (8.0,-1.4) {Descrição};
+    \node[etapa] (b4) at (11.4,-1.4) {Classificação};
+    \draw[seta] (b1) -- (b2);
+    \draw[rede] (b2) -- node[rot] {recortes} (b3);
+    \draw[seta] (b3) -- (b4);
+    % E3
+    \node[anchor=east] at (-0.2,-2.8) {\textbf{E3}};
+    \node[eb] (c1) at (1.2,-2.8) {Captura};
+    \node[eb] (c2) at (4.6,-2.8) {Segmentação};
+    \node[eb] (c3) at (8.0,-2.8) {Descrição};
+    \node[etapa] (c4) at (11.4,-2.8) {Classificação};
+    \draw[seta] (c1) -- (c2); \draw[seta] (c2) -- (c3);
+    \draw[rede] (c3) -- node[rot] {descritores} (c4);
+    % legenda
+    \node[eb, minimum width=0.4cm, minimum height=0.3cm] (l1) at (1.4,-4.0) {};
+    \node[right=2pt of l1] {borda (ESP32-CAM)};
+    \node[etapa, minimum width=0.4cm, minimum height=0.3cm] (l2) at (5.6,-4.0) {};
+    \node[right=2pt of l2] {servidor};
+    \draw[rede] (8.2,-4.0) -- (9.0,-4.0) node[right] {envio por Wi-Fi};
+  \end{tikzpicture}
+  \caption{Estratégias de transmissão. Quanto mais etapas a borda executa, menos dados trafegam pela rede.}
+  \label{fig:estrategias}
+\end{figure}
+
+\subsection{Ambiente de aquisição e conjunto de dados}
+
+Será construída uma caixa de captura com fundo fosco de cor contrastante com o metal, iluminação LED difusa e câmera fixa em altura constante, reduzindo sombras e reflexos. Serão consideradas quatro classes: parafuso, porca, arruela e prego. A meta é obter de 50 a 100 imagens por classe, com variação de posição e orientação, além de imagens com várias peças, inclusive encostadas. Um subconjunto de cerca de 30 imagens terá máscaras de referência anotadas manualmente para avaliar a segmentação, e cerca de 20\% do conjunto será reservado como teste e não será usado em nenhum ajuste.
+
+\subsection{Compressão}
+
+Serão avaliadas três formas de compressão: JPEG com perdas, com fatores de qualidade 10, 30, 50, 70 e 90, analisando a relação entre a quantização da DCT, os artefatos de bloco e a degradação das bordas; RLE e Huffman sem perdas, aplicados às máscaras binárias geradas na borda e implementados pelos autores; e o código de cadeia como representação compacta da fronteira para transmissão. As métricas serão taxa de compressão, bytes por quadro, PSNR e SSIM.
+
+\subsection{Segmentação}
+
+O \textit{pipeline} de segmentação incluirá conversão para tons de cinza, suavização gaussiana, limiarização de Otsu como método base e limiarização adaptativa como alternativa. Em seguida, serão aplicadas abertura e fechamento morfológicos, com cuidado para não fechar o furo de porcas e arruelas, e rotulação de componentes conexos. Para peças encostadas, será usada a transformada \textit{watershed} sobre a transformada de distância. A avaliação usará o IoU em relação às máscaras de referência, repetida para cada qualidade JPEG.
+
+\subsection{Representação e descrição}
+
+Para cada região segmentada, será extraído um vetor de características composto por descritores de fronteira (perímetro, código de cadeia de Freeman normalizado e os primeiros coeficientes dos descritores de Fourier, normalizados para invariância a translação, rotação e escala) e descritores regionais (área, compacidade, excentricidade, razão de aspecto do retângulo mínimo, número de Euler e os sete momentos invariantes de Hu, em escala logarítmica). Os descritores serão normalizados antes da classificação, e sua capacidade discriminativa será analisada por gráficos de dispersão entre pares de características.
+
+\subsection{Classificação}
+
+Serão treinados classificadores k-NN e SVM sobre os vetores de descritores, com validação cruzada estratificada de cinco partições. As métricas serão acurácia, F1 por classe e matriz de confusão. Como comparação opcional, um detector YOLO ajustado ao conjunto de dados poderá servir de linha de base.
+
+\subsection{Desenho experimental}
+
+As três estratégias da Figura~\ref{fig:estrategias} serão executadas sobre o mesmo conjunto de teste, com ao menos cinco repetições por configuração. Na estratégia E1, a borda envia o quadro inteiro em JPEG, em cada fator de qualidade, e o servidor executa todo o processamento. Na E2, a borda segmenta e envia apenas os recortes das peças. Na E3, a borda segmenta, extrai os descritores e envia apenas o vetor de características ou o código de cadeia, cabendo ao servidor somente a classificação. Caso a memória do ESP32-CAM não comporte a estratégia E3 integralmente, ela será executada em resolução reduzida (QVGA, em tons de cinza), com a máscara transmitida em RLE. As métricas coletadas estão na Tabela~\ref{tab:metricas}.
+
+\begin{table}[!htbp]
+  \centering
+  \caption{Métricas do desenho experimental.}
+  \label{tab:metricas}
+  \begin{tabular}{lll}
+    \toprule
+    \textbf{Métrica} & \textbf{Unidade} & \textbf{Estratégias} \\
+    \midrule
+    Dados transmitidos      & bytes por quadro & E1, E2, E3 \\
+    Latência de ida e volta & ms               & E1, E2, E3 \\
+    Uso de CPU na borda     & \%               & E1, E2, E3 \\
+    PSNR e SSIM             & dB e índice      & E1, E2 \\
+    IoU da segmentação      & 0 a 1            & E1 (por qualidade) \\
+    Acurácia e F1 por classe & \%              & E1, E2, E3 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+% ============================================================
+\section{Resultados Esperados}
+\label{sec:resultados}
+% ============================================================
+
+Espera-se que a estratégia E3 reduza os dados transmitidos em uma ou mais ordens de grandeza em relação à E1, ao custo de maior uso de CPU na borda e de menor flexibilidade, já que o servidor não terá acesso à imagem para reprocessamento ou auditoria. A estratégia E2 deve ocupar uma posição intermediária.
+
+Para a E1, espera-se identificar um fator de qualidade JPEG a partir do qual a degradação das bordas reduz o IoU da segmentação e, em consequência, a acurácia da classificação. Também se espera que descritores invariantes, como os momentos de Hu e o número de Euler, sejam suficientes para separar as quatro classes com alta acurácia em ambiente controlado.
+
+Como produtos, o projeto entregará o protótipo funcional, o conjunto de dados rotulado, o código-fonte, um relatório técnico com a análise comparativa e uma demonstração ao vivo.
+
+% ============================================================
+\section{Cronograma}
+\label{sec:cronograma}
+% ============================================================
+
+O projeto está planejado para quatro semanas, conforme a Tabela~\ref{tab:cronograma}.
+
+\begin{table}[H]
+  \centering
+  \caption{Cronograma de execução.}
+  \label{tab:cronograma}
+  \newcommand{\on}{\cellcolor{bordaesc}}
+  \begin{tabular}{lcccc}
+    \toprule
+    \textbf{Atividade} & \textbf{Sem. 1} & \textbf{Sem. 2} & \textbf{Sem. 3} & \textbf{Sem. 4} \\
+    \midrule
+    Caixa de captura, borda e comunicação & \on & & & \\
+    Aquisição e rotulação do conjunto de dados & \on & & & \\
+    Segmentação e descrição no servidor & & \on & & \\
+    Treinamento dos classificadores & & \on & & \\
+    Compressão (JPEG, RLE, Huffman) & & & \on & \\
+    Estratégias E2 e E3 na borda e experimentos & & & \on & \\
+    Análise, relatório e demonstração & & & & \on \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+% ============================================================
+\section{Recursos Necessários}
+\label{sec:recursos}
+% ============================================================
+
+\begin{table}[H]
+  \centering
+  \caption{Recursos necessários.}
+  \label{tab:recursos}
+  \begin{tabularx}{\textwidth}{>{\raggedright\arraybackslash}X >{\raggedright\arraybackslash}X}
+    \toprule
+    \textbf{Item} & \textbf{Finalidade} \\
+    \midrule
+    ESP32-CAM (OV2640) e programador USB & Aquisição e processamento na borda \\
+    Computador pessoal & Servidor de processamento e classificação \\
+    Caixa de papelão ou MDF, fundo fosco e LED & Ambiente de captura controlado \\
+    Parafusos, porcas, arruelas e pregos & Objetos de inspeção \\
+    Roteador ou ponto de acesso Wi-Fi & Comunicação entre os nós \\
+    Python, OpenCV, NumPy, scikit-learn; Arduino IDE ou ESP-IDF & Desenvolvimento do software \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+% ============================================================
+\section{Riscos e Mitigação}
+\label{sec:riscos}
+% ============================================================
+
+\begin{table}[H]
+  \centering
+  \caption{Principais riscos e ações de mitigação.}
+  \label{tab:riscos}
+  \begin{tabularx}{\textwidth}{>{\raggedright\arraybackslash}p{3.2cm} >{\raggedright\arraybackslash}p{3.4cm} >{\raggedright\arraybackslash}X}
+    \toprule
+    \textbf{Risco} & \textbf{Impacto} & \textbf{Mitigação} \\
+    \midrule
+    Iluminação inconsistente e reflexos no metal & Falhas na segmentação & Caixa de captura com luz difusa e fundo fosco \\
+    Peças encostadas ou sobrepostas & Regiões fundidas e classificação errada & \textit{Watershed}; restrição de posicionamento, se necessário \\
+    Memória insuficiente no ESP32-CAM & Inviabilidade de E2 e E3 na borda & Resolução QVGA em tons de cinza e envio da máscara em RLE \\
+    Instabilidade da rede Wi-Fi & Variação na latência medida & Repetições, com média e desvio-padrão \\
+    Conjunto de dados pequeno & Sobreajuste do classificador & Validação cruzada e descritores invariantes \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\bibliographystyle{sbc}
+\bibliography{referencias}
+
+\end{document}
