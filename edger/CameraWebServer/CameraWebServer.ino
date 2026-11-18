@@ -10,14 +10,14 @@
 // ===========================
 // Enter your WiFi credentials
 // ===========================
-const char *ssid = "**********";
-const char *password = "**********";
+const char *ssid = "karl_marx_sec_XXI"; // Nome da rede 
+const char *password = "ferrugem21"; // senha da rede
 
 void startCameraServer();
 void setupLedFlash();
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(9600);
   Serial.setDebugOutput(true);
   Serial.println();
 
