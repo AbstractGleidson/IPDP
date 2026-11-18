@@ -3,6 +3,7 @@ import onnxruntime as onnx
 import requests
 import numpy
 from pathlib import Path
+import time
 
 '''
 INFO SECTION
@@ -55,7 +56,7 @@ def set_awb(url: str, awb: int=1):
     return awb
 
 if __name__ == '__main__':
-    set_resolution(URL, index=8)
+    set_resolution(URL, index=9)
     
     providers = ["CPUExecutionProvider"]  # Força execução na CPU
     
@@ -162,14 +163,17 @@ if __name__ == '__main__':
             error_y = c_y - (HEIGHT // 2)
 
             # Exibe o frame em tela
-            cv2.imshow("Teste - YOLOv8 ONNX (Pi5)", frame)
+            cv2.imshow("Teste - YOLOv8 ONNX (esp32)", frame)
 
             key = cv2.waitKey(10) & 0xFF
-            
-            cv2.imshow("frame", frame)
 
             if key == ord('q'):
                 break
+            
+            elif key == ord("s"):
+                save_path = Path.home() / "Pictures" / "Esp32" / (f"{time.time()}" + ".jpeg")
+                cv2.imwrite(save_path, frame)
+                print(save_path)
 
     cv2.destroyAllWindows()
     cap.release()
