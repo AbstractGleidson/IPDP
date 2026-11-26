@@ -1,0 +1,7 @@
+numpy
+opencv-python
+requests
+pandas
+scikit-learn
+matplotlib
+joblib
