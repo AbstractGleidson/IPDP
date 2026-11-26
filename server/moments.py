@@ -1,116 +1,109 @@
-import numpy 
-import cv2 as opencv 
+import numpy as np
+import cv2
 
-# Momentos da imagem
-def moments(p: int, q: int, img):
-    
-    h, w = img.shape[:2]
-    mpq = 0
-    
-    for x in range(0, h):
-        for y in range(0, w):
-            mpq += numpy.pow(x, p) * numpy.pow(y, q) * img[x, y]
-         
-    return mpq 
+# calcula os momentos da imagem
+def moments(img, ordem=3):
+    """
+    Calcula todos os momentos brutos (m), centrais (mu) e normalizados (nu)
+    até a ordem pedida, de uma só vez.
 
-# Momentos centrais
-def centralized_moments(p, q, img):
+    m_pq = (Vx^T · I^T · Vy)[p, q], onde Vx e Vy são matrizes de
+    Vandermonde (colunas = x^0, x^1, ..., x^ordem). 
+    """
     
-    # centroid da imagem 
-    c_x = moments(1, 0, img) / moments(0, 0, img)
-    c_y = moments(0, 1, img) / moments(0, 0, img)
+    I = np.asarray(img) # transformação a imagem em um numpy array
     
-    h, w = img.shape[:2]
-    
-    npq = 0
-    
-    for x in range(0, h):
-        for y in range(0, w):
-            npq += numpy.pow(x - c_x, p) * numpy.pow(y - c_y, q) * img[x, y]
-            
-    return npq
-            
-# Momentos invariantes a escala
-def scale_invariant_moments(p, q, img):
-    vpq = centralized_moments(p, q, img)
-    v00 = centralized_moments(0, 0, img)
-    
-    y = ((p + q) / 2) + 1 # com (p + q) >= 2
-    
-    return (vpq) / numpy.pow(v00, y) 
-
-# This vector contains translation, scale, and rotation invariant and orientation related moments. 
-def rot_invariant_moments(img):
-    
-    # momentos base 
-    m00 = moments(0, 0, img)
-    m10 = moments(1, 0, img)
-    m01 = moments(0, 1, img)
-    m20 = moments(2, 0, img)
-    m11 = moments(1, 1, img)
-    m02 = moments(0, 2, img)
-    m30 = moments(3, 0, img)
-    m21 = moments(2, 1, img)
-    m12 = moments(1, 2, img)
-    m03 = moments(0, 3, img)
- 
-    # momentos centrais
-    mu20 = centralized_moments(2, 0, img)
-    mu11 = centralized_moments(1, 1, img)
-    mu02 = centralized_moments(0, 2, img)
-    mu30 = centralized_moments(3, 0, img)
-    mu21 = centralized_moments(2, 1, img)
-    mu12 = centralized_moments(1, 2, img)
-    mu03 = centralized_moments(0, 3, img)
-    
-    n20 = scale_invariant_moments(2, 0, img)
-    n02 = scale_invariant_moments(0, 2, img)
-    n11 = scale_invariant_moments(1, 1, img)
-    n30 = scale_invariant_moments(3, 0, img)
-    n12 = scale_invariant_moments(1, 2, img)
-    n21 = scale_invariant_moments(2, 1, img)
-    n03 = scale_invariant_moments(0, 3, img)
-    
-    I1 = n20 + n02 
-    I2 = numpy.pow(n20 - n02, 2) + numpy.pow(2 * n11, 2)
-    I3 = numpy.pow(n30 - (3 * n12), 2) + numpy.pow((3 * n21) - n03, 2)
-    I4 = numpy.pow(n30 + n12, 2) + numpy.pow(n21 + n03, 2)
-    I5 = (n30 - (3 * n12)) * (n30 + n12) * (numpy.pow(n30 + n12, 2) - (3 * numpy.pow(n21 + n03, 2))) + (3 * (n21) - n03) * (n21 + n03) * (3 * numpy.pow(n30 + n12, 2) - numpy.pow(n21 + n03, 2))
-    I6 = (n20 - n02) * (numpy.pow(n30 + n12, 2) - numpy.pow(n21 + n03, 2)) + ((4 * n11) * (n30 + n12) * (n21 + n03))
-    I7 = ((3 * n21) - n03) * (n30 + n12) * (numpy.pow(n30 + n12, 2) - (3 * numpy.pow(n21 + n03, 2))) - (n30 - (3 * n12)) * (n21 + n03) * ((3 * numpy.pow(n30 + n12, 2)) - numpy.pow(n21 + n03, 2))
-    I8 = (n11 * (numpy.pow(n30 + n12, 2) - numpy.pow(n03 + n21, 2))) - (n20 - n02) * (n30 + n12) * (n03 + n21)
+    # aplica conversão para grayscale  
+    if I.ndim == 3:
+        I = cv2.cvtColor(I, cv2.COLOR_BGR2GRAY)
         
-    return {
-        "m00" : m00,
-        "m10" : m10,
-        "m01" : m01,
-        "m20" : m20,
-        "m11" : m11,
-        "m02" : m02,
-        "m30" : m30,
-        "m21" : m21,
-        "m12" : m12,
-        "m03" : m03,
-        "mu20" : mu20,
-        "mu11" : mu11,
-        "mu02" : mu02,
-        "mu30" : mu30,
-        "mu21" : mu21,
-        "mu12" : mu12,
-        "mu03" : mu03,
-        "nu20" : n20,
-        "nu02" : n02,
-        "nu11" : n11,
-        "nu30" : n30,
-        "nu12" : n12,
-        "nu21" : n21,
-        "nu03" : n03,
-        "I1": I1,
-        "I2": I2,
-        "I3": I3,
-        "I4": I4,
-        "I5": I5,
-        "I6": I6, 
-        "I7": I7,
-        "I8": I8
-    }
+    I = I.astype(np.float64) 
+
+    h, w = I.shape # recupera as dimensões da imagem
+    
+    k = np.arange(ordem + 1)
+    x = np.arange(w, dtype=np.float64)
+    y = np.arange(h, dtype=np.float64)
+
+    # Momentos brutos: matriz (ordem+1) x (ordem+1), m[p, q]
+    Vx = x[:, None] ** k
+    Vy = y[:, None] ** k
+    m = Vx.T @ I.T @ Vy
+
+    m00 = m[0, 0]
+    if m00 == 0:
+        raise ValueError("Imagem vazia (m00 = 0): não há objeto para medir.")
+
+    # calcula centroide
+    cx, cy = m[1, 0] / m00, m[0, 1] / m00
+
+    # Momentos centrais: mesmo truque com coordenadas deslocadas
+    Ux = (x - cx)[:, None] ** k
+    Uy = (y - cy)[:, None] ** k
+    mu = Ux.T @ I.T @ Uy
+
+    # Momentos invariantes à escala: nu_pq = mu_pq / mu00^((p+q)/2 + 1)
+    p, q = np.meshgrid(k, k, indexing="ij")
+    gamma = (p + q) / 2.0 + 1.0
+    nu = mu / (mu[0, 0] ** gamma)
+
+    return m, mu, nu
+
+# momentos invariantes de HU
+def hu_invariants_moments(nu):
+    """I1..I7 de Hu + I8 de Flusser a partir da matriz nu[p, q]."""
+    
+    n20, n02, n11 = nu[2, 0], nu[0, 2], nu[1, 1]
+    n30, n03, n21, n12 = nu[3, 0], nu[0, 3], nu[2, 1], nu[1, 2]
+
+    a = n30 + n12
+    b = n21 + n03
+    c = n30 - 3 * n12
+    d = 3 * n21 - n03
+
+    I1 = n20 + n02
+    I2 = (n20 - n02) ** 2 + 4 * n11 ** 2
+    I3 = c ** 2 + d ** 2
+    I4 = a ** 2 + b ** 2
+    I5 = c * a * (a ** 2 - 3 * b ** 2) + d * b * (3 * a ** 2 - b ** 2)
+    I6 = (n20 - n02) * (a ** 2 - b ** 2) + 4 * n11 * a * b
+    I7 = d * a * (a ** 2 - 3 * b ** 2) - c * b * (3 * a ** 2 - b ** 2)
+    I8 = n11 * (a ** 2 - b ** 2) - (n20 - n02) * a * b
+
+    return np.array([I1, I2, I3, I4, I5, I6, I7, I8])
+
+# cria um dicionario com o momentos 
+def dict_moments(img):
+    """Mesmo formato de saída da sua função rot_invariant_moments."""
+    m, mu, nu = moments(img, ordem=3)
+    
+    out = {}
+    
+    # cria as labels para os momentos
+    for p in range(4):
+        for q in range(4 - p):
+            out[f"m{p}{q}"] = m[p, q]
+            
+            if p + q >= 2:
+                out[f"mu{p}{q}"] = mu[p, q]
+                out[f"nu{p}{q}"] = nu[p, q]
+    
+    for i, v in enumerate(hu_invariants_moments(nu), start=1):
+        out[f"I{i}"] = v
+    
+    return out
+
+# vetor de caracteristicas da imagem com base nos momentos
+def feature_vector(img, usar_log=True):
+    """
+    Vetor de 8 características (I1..I8).
+    Os invariantes variam por várias ordens de grandeza (1e-1 até 1e-20),
+    normaliza com transformação log com sinal
+    """
+    _, _, nu = moments(img, ordem=3)
+    hu = hu_invariants_moments(nu)
+    
+    if usar_log:
+        hu = -np.sign(hu) * np.log10(np.abs(hu) + 1e-30) # transformação log para linearizar
+    
+    return hu
