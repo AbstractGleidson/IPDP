@@ -14,8 +14,8 @@ from dataclasses import dataclass, field
 import cv2
 import numpy as np
 import requests
-import src.server.config as config
-import src.server.gi_decoder as gi_decoder
+import config as config
+import gi_decoder as gi_decoder
 
 # classe para representar um frame da esp32
 @dataclass

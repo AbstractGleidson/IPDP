@@ -2,8 +2,8 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-import src.server.config as config
-from src.server.moments import moments, feature_vector
+import config as config
+from moments import moments, feature_vector
 
 # constantes
 HU_NAMES = [f"hu{i}" for i in range(1, 9)]

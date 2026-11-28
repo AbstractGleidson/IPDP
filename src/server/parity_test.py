@@ -25,9 +25,9 @@ from datetime import datetime
 import cv2
 import numpy as np
 
-import src.server.config as config
-from src.server.esp32_client import ESP32
-from src.server.image_process import segment
+import config as config
+from esp32_client import ESP32
+from image_process import segment
 
 def add_title(img, text):
     out = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR) if img.ndim == 2 else img.copy()

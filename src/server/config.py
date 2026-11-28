@@ -1,13 +1,13 @@
 from pathlib import Path
 
-ESP32_URL = "http://10.13.31.16" # ip da camera
+ESP32_URL = "http://192.168.3.111" # ip da camera
 TIMEOUT_S = 5
 
 # A ordem define as teclas 1, 2, 3, 4, 5 no script de captura.
 CLASSES = ["parafuso", "porca", "sensor_ultrassonico", "servo", "motor_dc"]
 
 # Pastas
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 DATA_DIR = ROOT / "data"
 MODELS_DIR = ROOT / "server" / "models"
 RESULTS_DIR = ROOT / "server" / "results"

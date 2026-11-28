@@ -32,10 +32,10 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
-import src.server.config as config
-import src.server.gi_decoder as gi_decoder
-import src.server.image_process as ip
-from src.server.k_means import KMeansClassifier
+import config as config
+import gi_decoder as gi_decoder
+import image_process as ip
+from k_means import KMeansClassifier
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt 

@@ -1,0 +1,21 @@
+{
+  "largura": 640,
+  "altura": 480,
+  "roi": [
+    0,
+    0,
+    640,
+    480
+  ],
+  "fundo": false,
+  "obj_claro": true,
+  "gauss_k": 3,
+  "open_k": 3,
+  "close_k": 3,
+  "aec": 1,
+  "aec_value": 168,
+  "agc": 1,
+  "agc_gain": 0,
+  "brightness": 0,
+  "contrast": 0
+}

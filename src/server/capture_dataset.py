@@ -30,9 +30,9 @@ from pathlib import Path
 import cv2
 import numpy as np
 import requests
-import src.server.config as config
-from src.server.esp32_client import ESP32
-from src.server.image_process import load_background, process_image, draw
+import config as config
+from esp32_client import ESP32
+from image_process import load_background, process_image, draw
 
 # campos de meta dados
 METADATA_FIELDS = ["file", "label", "piece_id", "session", "mode", "timestamp", "width", "height", "n_pieces", "threshold"]

@@ -35,9 +35,9 @@ import joblib
 import numpy as np
 import pandas as pd
 
-import src.server.config as config
-import src.server.image_process as ip
-from src.server.esp32_client import ESP32
+import config as config
+import image_process as ip
+from esp32_client import ESP32
 
 FIELDS = ["strategy", "param", "repetition", "bytes_received", "raw_bytes", "compression_ratio",
           "t_capture_ms", "t_edge_ms", "t_request_ms", "t_network_ms", "t_decompress_ms",
