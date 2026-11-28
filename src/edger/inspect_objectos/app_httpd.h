@@ -1,11 +1,13 @@
 // app_httpd.h  -  rotas HTTP
 //
 //   GET /raw                      imagem em cinza sem compressão (dataset)
-//   GET /e1?q=50                  E1: imagem em cinza comprimida em JPEG, qualidade 1..100 (escala do OpenCV)
-//   GET /e2?fmt=bits|bytes        E2: máscara binária (bits: 8 pixels por byte)
+//   GET /e1?bits=8                E1: imagem em cinza comprimida em GI (RLE + Huffman), 1..8 bits (8 = sem perdas)
+//   GET /e1?codec=jpeg&q=50       E1 com JPEG, para comparação (qualidade 1..100, escala do OpenCV)
+//   GET /e2                       E2: máscara 0/1 comprimida em GI (bits = 8, sem perdas)
+//   GET /e2?fmt=bits|bytes        E2 sem compressão (bits: 8 pixels por byte), para comparação
 //   GET /paridade                 cinza + máscara do MESMO quadro (teste com o Python)
-//   GET /fundo?acao=capturar      média de N_BACKGROUNDS quadros da bandeja vazia
-//   GET /fundo?acao=limpar        apaga o fundo (segmentação sem subtração)
+//   GET /fundo?action=capturar      média de N_BACKGROUNDS quadros da bandeja vazia
+//   GET /fundo?action=limpar        apaga o fundo (segmentação sem subtração)
 //   GET /fundo                    baixa o fundo guardado
 //   GET /set?var=X&val=Y          exposição, ganho, brilho, contraste
 //   GET /status                   ajustes atuais em JSON
@@ -17,19 +19,20 @@
 #include "esp_timer.h"
 #include "img_converters.h"
 #include "image_process.h"
+#include "rle_huff.h"
 
 // Lê um parâmetro da query string.
-static bool param(httpd_req_t *req, const char *chave, char *val, size_t n) {
+static bool get_param(httpd_req_t *req, const char *key, char *val, size_t n) {
   char q[96];
-  return httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK && httpd_query_key_value(q, chave, val, n) == ESP_OK;
+  return httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK && httpd_query_key_value(q, key, val, n) == ESP_OK;
 }
 
-// Cabeçalhos comuns. Os textos ficam no struct para viver até o envio da resposta.
-struct Cabecalhos {
-  char w[8], h[8], cap[24], proc[24], extra[16];
+// Cabeçalhos comuns. Os textos ficam no struct para ficar ativo até o envio da resposta.
+struct Headers {
+  char w[8], h[8], cap[24], proc[24], extra[16], raw[16], bits[4];
 };
 
-static void cabecalhos(httpd_req_t *req, Cabecalhos &c, int64_t t_cap, int64_t t_proc) {
+static void set_headers(httpd_req_t *req, Headers &c, int64_t t_cap, int64_t t_proc) {
   snprintf(c.w, sizeof(c.w), "%d", W);
   snprintf(c.h, sizeof(c.h), "%d", H);
   snprintf(c.cap, sizeof(c.cap), "%lld", (long long)t_cap);
@@ -44,66 +47,103 @@ static void cabecalhos(httpd_req_t *req, Cabecalhos &c, int64_t t_cap, int64_t t
 static esp_err_t raw_handler(httpd_req_t *req) {
   int64_t t_cap;
   if (!get_roi(t_cap)) return httpd_resp_send_500(req);
-  Cabecalhos c;
-  cabecalhos(req, c, t_cap, 0);
+  Headers c;
+  set_headers(req, c, t_cap, 0);
   httpd_resp_set_type(req, "application/octet-stream");
   return httpd_resp_send(req, (const char *)gray_buf, N);
 }
 
-// GET /e1?q=50
+// GET /e1?bits=8 (GI) | /e1?codec=jpeg&q=50
 static esp_err_t e1_handler(httpd_req_t *req) {
-  char v[8];
-  int q = param(req, "q", v, sizeof(v)) ? atoi(v) : 50;
-  q = constrain(q, 1, 100);
+  char codec[8] = "gi", v[8];
+  get_param(req, "codec", codec, sizeof(codec));
+  bool jpeg = !strcmp(codec, "jpeg");
 
   int64_t t_cap;
   if (!get_roi(t_cap)) return httpd_resp_send_500(req);
-  int64_t t0 = esp_timer_get_time();
-  uint8_t *jpg = nullptr;
-  size_t jpg_len = 0;
-  if (!fmt2jpg(gray_buf, N, W, H, PIXFORMAT_GRAYSCALE, q, &jpg, &jpg_len)) return httpd_resp_send_500(req);
-  int64_t t_proc = esp_timer_get_time() - t0;
+  Headers c;
 
-  Cabecalhos c;
-  cabecalhos(req, c, t_cap, t_proc);
-  snprintf(c.extra, sizeof(c.extra), "%d", q);
-  httpd_resp_set_hdr(req, "X-Quality", c.extra);
-  httpd_resp_set_type(req, "image/jpeg");
-  esp_err_t r = httpd_resp_send(req, (const char *)jpg, jpg_len);
-  free(jpg);
-  return r;
+  if (jpeg) {
+    int q = get_param(req, "q", v, sizeof(v)) ? atoi(v) : 50;
+    q = constrain(q, 1, 100);
+    int64_t t0 = esp_timer_get_time();
+    uint8_t *jpg = nullptr;
+    size_t jpg_len = 0;
+    if (!fmt2jpg(gray_buf, N, W, H, PIXFORMAT_GRAYSCALE, q, &jpg, &jpg_len)) return httpd_resp_send_500(req);
+    set_headers(req, c, t_cap, esp_timer_get_time() - t0);
+    snprintf(c.extra, sizeof(c.extra), "%d", q);
+    snprintf(c.raw, sizeof(c.raw), "%u", (unsigned)N);
+    httpd_resp_set_hdr(req, "X-Codec", "jpeg");
+    httpd_resp_set_hdr(req, "X-Quality", c.extra);
+    httpd_resp_set_hdr(req, "X-Raw-Bytes", c.raw);
+    httpd_resp_set_type(req, "image/jpeg");
+    esp_err_t r = httpd_resp_send(req, (const char *)jpg, jpg_len);
+    free(jpg);
+    return r;
+  }
+
+  int bits = get_param(req, "bits", v, sizeof(v)) ? atoi(v) : 8;
+  bits = constrain(bits, 1, 8);
+  int64_t t0 = esp_timer_get_time();
+  size_t len = gi_encode(gray_buf, (uint16_t)W, (uint16_t)H, (uint8_t)bits, work_buf, work_cap, nullptr);
+  if (!len) return httpd_resp_send_500(req);
+  set_headers(req, c, t_cap, esp_timer_get_time() - t0);
+  snprintf(c.bits, sizeof(c.bits), "%d", bits);
+  snprintf(c.raw, sizeof(c.raw), "%u", (unsigned)N);
+  httpd_resp_set_hdr(req, "X-Codec", "gi");
+  httpd_resp_set_hdr(req, "X-Bits", c.bits);
+  httpd_resp_set_hdr(req, "X-Raw-Bytes", c.raw);  // tamanho sem compressão
+  httpd_resp_set_type(req, "application/octet-stream");
+  return httpd_resp_send(req, (const char *)work_buf, len);
 }
 
-// GET /e2?fmt=bits|bytes
+// GET /e2 (GI) | /e2?fmt=bits|bytes (sem compressão)
 static esp_err_t e2_handler(httpd_req_t *req) {
-  char fmt[8] = "bits";
-  param(req, "fmt", fmt, sizeof(fmt));
+  char fmt[8] = "gi";
+  get_param(req, "fmt", fmt, sizeof(fmt));
   bool bytes = !strcmp(fmt, "bytes");
+  bool packed = !strcmp(fmt, "bits");
 
   int64_t t_cap;
   if (!get_roi(t_cap)) return httpd_resp_send_500(req);
   int64_t t0 = esp_timer_get_time();
   uint8_t thres = threshold_otsu();
-  size_t n = bytes ? N : empacotar_bits();
+
+  const uint8_t *payload;
+  size_t n;
+  if (bytes) {
+    payload = mask_buf;
+    n = N;
+  } else if (packed) {
+    n = pack_bits();
+    payload = bits_buf;
+  } else {
+    // máscara com valores 0/1: bits = 8 preserva os valores (com bits = 1 tudo viraria 0)
+    n = gi_encode(mask_buf, (uint16_t)W, (uint16_t)H, 8, work_buf, work_cap, nullptr);
+    if (!n) return httpd_resp_send_500(req);
+    payload = work_buf;
+  }
   int64_t t_proc = esp_timer_get_time() - t0;
 
-  Cabecalhos c;
-  cabecalhos(req, c, t_cap, t_proc);
+  Headers c;
+  set_headers(req, c, t_cap, t_proc);
   snprintf(c.extra, sizeof(c.extra), "%u", thres);
+  snprintf(c.raw, sizeof(c.raw), "%u", (unsigned)((N + 7) / 8));
   httpd_resp_set_hdr(req, "X-Threshold", c.extra);
-  httpd_resp_set_hdr(req, "X-Format", bytes ? "bytes" : "bits");
+  httpd_resp_set_hdr(req, "X-Format", bytes ? "bytes" : packed ? "bits" : "gi");
+  httpd_resp_set_hdr(req, "X-Raw-Bytes", c.raw);  // máscara empacotada, 1 bit por pixel
   httpd_resp_set_type(req, "application/octet-stream");
-  return httpd_resp_send(req, (const char *)(bytes ? mask_buf : bits_buf), n);
+  return httpd_resp_send(req, (const char *)payload, n);
 }
 
 // GET /paridade : N bytes de cinza seguidos de N bytes de máscara, do mesmo quadro
-static esp_err_t paridade_handler(httpd_req_t *req) {
+static esp_err_t parity_handler(httpd_req_t *req) {
   int64_t t_cap;
   if (!get_roi(t_cap)) return httpd_resp_send_500(req);
   int64_t t0 = esp_timer_get_time();
   uint8_t thres = threshold_otsu();
-  Cabecalhos c;
-  cabecalhos(req, c, t_cap, esp_timer_get_time() - t0);
+  Headers c;
+  set_headers(req, c, t_cap, esp_timer_get_time() - t0);
   snprintf(c.extra, sizeof(c.extra), "%u", thres);
   httpd_resp_set_hdr(req, "X-Threshold", c.extra);
   httpd_resp_set_hdr(req, "X-Fundo", has_background ? "1" : "0");
@@ -113,30 +153,30 @@ static esp_err_t paridade_handler(httpd_req_t *req) {
   return httpd_resp_send_chunk(req, nullptr, 0);
 }
 
-// GET /fundo?acao=capturar|limpar  (sem ação: baixa o fundo)
-static esp_err_t fundo_handler(httpd_req_t *req) {
-  char acao[12] = "";
-  param(req, "acao", acao, sizeof(acao));
+// GET /fundo?action=capturar|limpar  (sem ação: baixa o fundo)
+static esp_err_t background_handler(httpd_req_t *req) {
+  char action[12] = "";
+  get_param(req, "action", action, sizeof(action));
 
-  if (!strcmp(acao, "capturar")) {
-    uint16_t *soma = (uint16_t *)ps_malloc(N * sizeof(uint16_t));
-    if (!soma) return httpd_resp_send_500(req);
-    memset(soma, 0, N * sizeof(uint16_t));
+  if (!strcmp(action, "capturar")) {
+    uint16_t *sum = (uint16_t *)ps_malloc(N * sizeof(uint16_t));
+    if (!sum) return httpd_resp_send_500(req);
+    memset(sum, 0, N * sizeof(uint16_t));
     int64_t t;
     for (int k = 0; k < N_BACKGROUNDS; k++) {
       if (!get_roi(t)) {
-        free(soma);
+        free(sum);
         return httpd_resp_send_500(req);
       }
-      for (size_t i = 0; i < N; i++) soma[i] += gray_buf[i];
+      for (size_t i = 0; i < N; i++) sum[i] += gray_buf[i];
       delay(60);  // garante quadros diferentes
     }
-    for (size_t i = 0; i < N; i++) background_buff[i] = (soma[i] + N_BACKGROUNDS / 2) / N_BACKGROUNDS;
-    free(soma);
+    for (size_t i = 0; i < N; i++) background_buff[i] = (sum[i] + N_BACKGROUNDS / 2) / N_BACKGROUNDS;
+    free(sum);
     has_background = true;
     return httpd_resp_sendstr(req, "fundo capturado");
   }
-  if (!strcmp(acao, "limpar")) {
+  if (!strcmp(action, "limpar")) {
     has_background = false;
     return httpd_resp_sendstr(req, "fundo apagado");
   }
@@ -144,8 +184,8 @@ static esp_err_t fundo_handler(httpd_req_t *req) {
     httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "sem fundo");
     return ESP_FAIL;
   }
-  Cabecalhos c;
-  cabecalhos(req, c, 0, 0);
+  Headers c;
+  set_headers(req, c, 0, 0);
   httpd_resp_set_type(req, "application/octet-stream");
   return httpd_resp_send(req, (const char *)background_buff, N);
 }
@@ -153,7 +193,7 @@ static esp_err_t fundo_handler(httpd_req_t *req) {
 // GET /set?var=X&val=Y
 static esp_err_t set_handler(httpd_req_t *req) {
   char var[20], val[12];
-  if (!param(req, "var", var, sizeof(var)) || !param(req, "val", val, sizeof(val))) {
+  if (!get_param(req, "var", var, sizeof(var)) || !get_param(req, "val", val, sizeof(val))) {
     httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "use /set?var=X&val=Y");
     return ESP_FAIL;
   }
@@ -191,7 +231,7 @@ static esp_err_t status_handler(httpd_req_t *req) {
 
 // Registra uma rota GET. A struct começa zerada, então os campos opcionais
 // (websocket etc.) ficam com valores padrão e não geram avisos.
-static void registrar_rota(httpd_handle_t srv, const char *uri, esp_err_t (*handler)(httpd_req_t *)) {
+static void register_route(httpd_handle_t srv, const char *uri, esp_err_t (*handler)(httpd_req_t *)) {
   httpd_uri_t r = {};
   r.uri = uri;
   r.method = HTTP_GET;
@@ -200,7 +240,7 @@ static void registrar_rota(httpd_handle_t srv, const char *uri, esp_err_t (*hand
   httpd_register_uri_handler(srv, &r);
 }
 
-static void iniciar_servidor() {
+static void start_server() {
   httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
   cfg.stack_size = 8192;
   httpd_handle_t srv = nullptr;
@@ -208,11 +248,11 @@ static void iniciar_servidor() {
     Serial.println("Falha ao iniciar o servidor HTTP");
     return;
   }
-  registrar_rota(srv, "/raw", raw_handler);
-  registrar_rota(srv, "/e1", e1_handler);
-  registrar_rota(srv, "/e2", e2_handler);
-  registrar_rota(srv, "/paridade", paridade_handler);
-  registrar_rota(srv, "/fundo", fundo_handler);
-  registrar_rota(srv, "/set", set_handler);
-  registrar_rota(srv, "/status", status_handler);
+  register_route(srv, "/raw", raw_handler);
+  register_route(srv, "/e1", e1_handler);
+  register_route(srv, "/e2", e2_handler);
+  register_route(srv, "/paridade", parity_handler);
+  register_route(srv, "/fundo", background_handler);
+  register_route(srv, "/set", set_handler);
+  register_route(srv, "/status", status_handler);
 }

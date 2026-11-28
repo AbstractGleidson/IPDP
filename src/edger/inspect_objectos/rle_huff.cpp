@@ -1,13 +1,8 @@
 // Implementação do pacote "GI" (RLE + Huffman canônico).
-//
-//   - sem malloc/new, sem STL: toda a memória de trabalho é estática (~9 KB),
-//     fora da pilha;
 
 #include "rle_huff.h"
-
 #include <string.h>
 
-// ============================================================================
 // Iterador de runs 
 //
 // Percorre a imagem devolvendo uma corrida por vez: 'len' pixels 
@@ -34,9 +29,7 @@ static int next_run(run_iter_t *it, uint8_t *len, uint8_t *val) {
     return 1;
 }
 
-// ============================================================================
 // Huffman
-
 static uint32_t h_freq[511];
 static int16_t h_parent[511];
 static uint8_t h_alive[511];
@@ -94,13 +87,11 @@ static int huff_lengths(const uint32_t freq[256], uint8_t len[256]) {
     return 1;
 }
 
-// ============================================================================
 // Huffman canônico: códigos a partir dos comprimentos
 //
 // Percorrendo os símbolos por (tamanho, símbolo), o primeiro 
 // recebe 0 e cada um seguinte recebe o anterior + 1, 
 // deslocado à esquerda quando o tamanho aumenta. 
-
 static void canonical_codes(const uint8_t len[256], uint32_t code[256]) {
     uint16_t count[GI_MAX_CODE_LEN + 1];
     uint32_t next[GI_MAX_CODE_LEN + 1];
@@ -122,10 +113,7 @@ static void canonical_codes(const uint8_t len[256], uint32_t code[256]) {
     }
 }
 
-// ============================================================================
 // Escrita de bytes e bits no buffer de saída
-//
-
 typedef struct {
     uint8_t *buf;
     size_t cap;
@@ -186,9 +174,7 @@ static uint16_t write_table(writer_t *w, const uint8_t len[256]) {
     return k;
 }
 
-// ============================================================================
 // API pública
-
 size_t gi_max_size(uint16_t w, uint16_t h) {
     // Cabeçalho (12) + duas tabelas no pior caso (2 + 2*256 cada) + bitstream.
     return 12 + 2 * (2 + 2 * 256) + 2 * (size_t)w * h + 1;
@@ -206,7 +192,7 @@ size_t gi_encode(const uint8_t *img, uint16_t w, uint16_t h, uint8_t bits,
     const size_t n = (size_t)w * h;
     const uint8_t shift = (uint8_t)(8 - bits);
 
-    // ---- 1ª passada: RLE só para contar as frequências ---------------------
+    // 1ª passada: RLE só para contar as frequências
     memset(s_freq_c, 0, sizeof(s_freq_c));
     memset(s_freq_v, 0, sizeof(s_freq_v));
 
@@ -219,13 +205,13 @@ size_t gi_encode(const uint8_t *img, uint16_t w, uint16_t h, uint8_t bits,
         num_runs++;
     }
 
-    // ---- Huffman: comprimentos e códigos canônicos -------------------------
+    // Huffman: comprimentos e códigos canônicos
     if (!huff_lengths(s_freq_c, s_len_c)) return 0;
     if (!huff_lengths(s_freq_v, s_len_v)) return 0;
     canonical_codes(s_len_c, s_code_c);
     canonical_codes(s_len_v, s_code_v);
 
-    // ---- Cabeçalho e tabelas -----------------------------------------------
+    // Cabeçalho e tabelas
     writer_t wr = {out, out_cap, 0, 0, 0};
     w_u8(&wr, 'G');
     w_u8(&wr, 'I');
@@ -238,7 +224,7 @@ size_t gi_encode(const uint8_t *img, uint16_t w, uint16_t h, uint8_t bits,
     const uint16_t kv = write_table(&wr, s_len_v);
     const size_t header_bytes = wr.pos;
 
-    // ---- 2ª passada: RLE de novo, agora escrevendo os códigos --------------
+    // 2ª passada: RLE de novo, agora escrevendo os códigos
     it.i = 0;
     while (next_run(&it, &rl, &rv)) {
         w_bits(&wr, s_code_c[rl], s_len_c[rl]);

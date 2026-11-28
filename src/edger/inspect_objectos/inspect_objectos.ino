@@ -2,13 +2,14 @@
  * inspect_objectos.ino 
  *
  * Estratégias:
- *   E1: a placa envia a imagem inteira em tons de cinza, comprimida (JPEG).
- *   E2: a placa segmenta as peças e envia só a imagem binária (1 bit por pixel).
+ *   E1: a placa envia a imagem inteira em tons de cinza, comprimida em GI (RLE + Huffman).
+ *   E2: a placa segmenta as peças e envia só a máscara binária, comprimida em GI.
  *
  * Arquivos:
  *   camera_pins.h          pinos da AI Thinker ESP32-CAM
  *   image_process.h        ROI, gaussiano, Otsu, erosão, dilatação e segmentação
  *   app_httpd.h            rotas HTTP
+ *   rle_huff.h / .cpp      compressão GI (cópia de Enconding/)
  *   inspect_objectos.ino   câmera, ROI, Wi-Fi, setup e loop
  */
 
@@ -28,7 +29,7 @@
 #define ROI_W 0
 #define ROI_H 0
 
-static bool iniciar_camera() {
+static bool init_camera() {
   camera_config_t config = {};
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
@@ -66,7 +67,7 @@ static bool iniciar_camera() {
 }
 
 // Define a ROI a partir do tamanho real do quadro.
-static bool configurar_roi() {
+static bool setup_roi() {
   camera_fb_t *fb = esp_camera_fb_get(); // buffer com imagem
 
   // verfica se conseguiu ler 
@@ -112,13 +113,13 @@ void setup() {
     return; 
   }
 
-  if (!iniciar_camera()) 
+  if (!init_camera()) 
   { 
     Serial.println("Falha ao iniciar a câmera");
     return; 
   }
 
-  if (!configurar_roi()) 
+  if (!setup_roi()) 
     return;
 
   if (!alloc_buffers()) 
@@ -138,7 +139,7 @@ void setup() {
 
   Serial.println();
 
-  iniciar_servidor();
+  start_server();
   Serial.print("Pronto: http://");
   
   Serial.println(WiFi.localIP());

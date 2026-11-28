@@ -10,3 +10,4 @@ data/processado/
 server/resultados/
 server/models/*.joblib
 server/config.py
+server/parity_test.py

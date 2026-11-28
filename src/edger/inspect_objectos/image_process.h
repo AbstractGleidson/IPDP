@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include "esp_camera.h"
 #include "esp_timer.h"
+#include "rle_huff.h"
 
 // Configuração do processamento
 static const bool OBJ_CLARO = true; // sem fundo: peça mais clara que o fundo 
@@ -27,6 +28,12 @@ static uint8_t  *mask_buf = nullptr; // máscara 0/1
 static uint8_t  *background_buff = nullptr; // fundo
 static uint8_t  *bits_buf = nullptr; // máscara empacotada
 static uint16_t *blur_buf = nullptr; // passada horizontal do gaussiano (somas sem dividir)
+
+// Área de trabalho compartilhada: o gaussiano usa como blur_buf (2N bytes) e, depois da
+// segmentação, a compressão GI escreve o pacote nela (gi_max_size = 2N + ~1 KB).
+// As duas coisas nunca acontecem ao mesmo tempo, e isso economiza ~600 KB de PSRAM em VGA.
+static uint8_t *work_buf = nullptr;
+static size_t work_cap = 0;
 static bool has_background = false;
 
 // aloca memoria para os buffes
@@ -37,14 +44,16 @@ static bool alloc_buffers() {
     mask_buf = (uint8_t *)ps_malloc(N);
     background_buff = (uint8_t *)ps_malloc(N);
     bits_buf = (uint8_t *)ps_malloc((N + 7) / 8);
-    blur_buf = (uint16_t *)ps_malloc(N * sizeof(uint16_t));
+    work_cap = gi_max_size((uint16_t)W, (uint16_t)H);
+    work_buf = (uint8_t *)ps_malloc(work_cap);
+    blur_buf = (uint16_t *)work_buf;
 
-    return gray_buf && tmp_buf && aux_buf && mask_buf && background_buff && bits_buf && blur_buf;
+    return gray_buf && tmp_buf && aux_buf && mask_buf && background_buff && bits_buf && work_buf;
 }
 
 
 // Copia a ROI do quadro da câmera para gray_buf.
-static bool get_roi(int64_t &t_captura) {
+static bool get_roi(int64_t &t_capture) {
     int64_t t0 = esp_timer_get_time(); // t do frame
     camera_fb_t *fb = esp_camera_fb_get(); // pega frame da camera
 
@@ -64,7 +73,7 @@ static bool get_roi(int64_t &t_captura) {
     memcpy(gray_buf + (size_t)y * W, fb->buf + (size_t)(OY + y) * fb->width + OX, W);
 
     esp_camera_fb_return(fb); 
-    t_captura = esp_timer_get_time() - t0; // tempo de processamento do roi
+    t_capture = esp_timer_get_time() - t0; // tempo de processamento do roi
 
     return true;
 }
@@ -104,7 +113,7 @@ static void gaussian_blur(const uint8_t *src, uint8_t *dst) {
     binomial_kernel(GAUSS_K, c); // gera os coeficiente em c
 
     const int r = GAUSS_K / 2; // calcula o tamanho da mascara
-    const int shift = 2 * (GAUSS_K - 1); // soma do kernel 
+    const int shift = 2 * (GAUSS_K - 1); // sum do kernel 
 
     // passada orizontal 
     for (int y = 0; y < H; y++) 
@@ -142,7 +151,7 @@ static uint8_t otsu(const uint8_t *img, size_t n)
     for (size_t i = 0; i < n; i++) 
         hist[img[i]]++;
 
-    uint64_t sum = 0;  // soma de t * hist[t]
+    uint64_t sum = 0;  // sum de t * hist[t]
 
     // acumulada das intensidades pelo peso
     for (int t = 0; t < 256; t++) 
@@ -277,7 +286,7 @@ static uint8_t threshold_otsu() {
 }
 
 // Empacota a máscara: 8 pixels por byte, bit mais significativo primeiro.
-static size_t empacotar_bits() 
+static size_t pack_bits() 
 {
     size_t nb = (N + 7) / 8;
     memset(bits_buf, 0, nb);
